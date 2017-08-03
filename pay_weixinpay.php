@@ -1,12 +1,10 @@
 <?php
-/**
+/*
  *微信支付
  *扫码支付和jsapi支付app支付
  * @author The Wings
  */
 final class pay_weixinpay{
-    //支付方式名称  
-    //private $name = 'weixin';
 	//返回jsapi数据
 	public $jsapiData = null;
 	//设置存放属性的数组
@@ -27,8 +25,9 @@ final class pay_weixinpay{
 	private $_REPORT_LEVENL = 1;
 	private $notify_url = '/notify_url.php';//回调地址
 	private $qrcode = '/lib/qrcode.php?data=';//二维码生成地址
+    private $tradeType = "";
 
-	/**
+	/*
 	 * 设置订单参数
 	 * @param payment Array 支付信息
 	 * @param type String  支付类型
@@ -37,20 +36,22 @@ final class pay_weixinpay{
 		//由于请求参数不能空格将空格去除 
 		$payment['goods_name'] = str_replace(" ","",$payment['goods_name']);
 		$this->SetParamer('body',$payment['goods_name']);
-		$this->SetParamer('attach',$payment['goods_name']);
+		$this->SetParamer('attach',$payment['attach']);
 		$this->SetParamer('out_trade_no',$payment['order_id']);
 		$price = number_format($payment['amount'],2,".","")*100;//不可省略格式步骤
 		$this->SetParamer('total_fee',$price);
 		$this->SetParamer('time_start',date("YmdHis"));
 		$this->SetParamer('time_expire',date("YmdHis", time() + 600));
 		$this->SetParamer('goods_tag',$payment['goods_name']);
-		$this->SetParamer('notify_url',$this->notify_url);
+		$this->SetParamer('notify_url',$payment['notify_url']);
 		//判断调用接口类型
 		switch ($type) {
 			case 'app':
 				$this->SetParamer('trade_type',"APP");
 				$order = $this->unifiedOrder();
-				return $order;
+				//获取签名
+                $sginList = $this->getSginApp($order);
+				return $sginList;
 			break;
 			case 'native':
 				$this->SetParamer('trade_type',"NATIVE");
@@ -74,7 +75,7 @@ final class pay_weixinpay{
 		}
 	}
 	
-	/**
+	/*
 	 * 回调入口
 	 * @param bool $needSign  是否需要签名输出
 	 */
@@ -121,7 +122,7 @@ final class pay_weixinpay{
 		return false;
 	}
 
-	/**
+	/*
 	 * 生成直接支付url，支付url有效期为2小时,模式二
 	 */
 	private function GetPayUrl(){
@@ -131,7 +132,7 @@ final class pay_weixinpay{
 			return $result;
 		}
 	}
-	/**
+	/*
 	 * 统一下单，WxPayUnifiedOrder中out_trade_no、body、total_fee、trade_type必填
 	 * appid、mchid、spbill_create_ip、nonce_str不需要填入
 	 * @param WxPayUnifiedOrder $inputObj
@@ -161,7 +162,7 @@ final class pay_weixinpay{
 		}
 		//异步通知url未设置，则使用配置文件中的url
 		if(!$this->IsParamerSet('notify_url')){
-			$inputObj->SetNotify_url($this->_NOTIFY_URL);//异步通知url
+			$this->SetNotify_url($this->_NOTIFY_URL);//异步通知url
 		}
 		if($this->GetParamer('trade_type') == 'APP'){
 			$this->SetParamer('appid',$this->OPEN_APPID);//开放平台appid
@@ -186,7 +187,7 @@ final class pay_weixinpay{
 		return $result;
 	}
 	
-	/**
+	/*
 	 * 通过跳转获取用户的openid，跳转流程如下：
 	 * 1、设置自己需要调回的url及其其他参数，跳转到微信服务器https://open.weixin.qq.com/connect/oauth2/authorize
 	 * 2、微信服务处理完成之后会跳转回用户redirect_uri地址，此时会带上一些参数，如：code
@@ -208,7 +209,7 @@ final class pay_weixinpay{
 		}
 	}
 	
-	/**
+	/*
 	 * 获取jsapi支付的参数
 	 * @param array $UnifiedOrderResult 统一支付接口返回的数据
 	 * @throws WxPayException
@@ -247,7 +248,7 @@ final class pay_weixinpay{
 		return $parameters;
 	}
 	
-	/**
+	/*
 	 * 上报数据， 上报的时候将屏蔽所有异常流程
 	 * @param string $usrl
 	 * @param int $startTimeStamp
@@ -309,7 +310,7 @@ final class pay_weixinpay{
 		}
 	}
 	
-	/**
+	/*
 	 * 测速上报，该方法内部封装在report中，使用时请注意异常流程
 	 * WxPayReport中interface_url、return_code、result_code、user_ip、execute_time_必填
 	 * appid、mchid、spbill_create_ip、nonce_str不需要填入
@@ -347,7 +348,7 @@ final class pay_weixinpay{
 		return $response;
 	}
 	
-	/**
+	/*
      * 将xml转为array
      * @param string $xml
      * @throws Exception
@@ -361,7 +362,7 @@ final class pay_weixinpay{
         return $this->values;
 	}
 	
-	/**
+	/*
 	 * 检测签名
 	 */
 	private function CheckSign(){
@@ -377,7 +378,7 @@ final class pay_weixinpay{
 		throw new Exception("签名错误！");
 	}
 
-	/**
+	/*
      * 将xml转为array
      * @param string $xml
      * @throws Exception
@@ -389,11 +390,12 @@ final class pay_weixinpay{
         //将XML转为array
         //禁止引用外部xml实体
         libxml_disable_entity_loader(true);
-        $this->values = json_decode(json_encode(simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NOCDATA)), true);		
-		return $this->values;
+        $this->values = json_decode(json_encode(simplexml_load_string($xml, 'SimpleXMLElement', LIBXML_NOCDATA)), true);
+        saveLog("weixinpay_client", 'http://'.$_SERVER['HTTP_HOST'].$_SERVER['PHP_SELF'].'?'.json_encode($this->values));
+        return $this->values;
 	}
 	
-	/**
+	/*
 	 * 以post方式提交xml到对应的接口url
 	 * @param string $xml  需要post的xml数据
 	 * @param string $url  url
@@ -444,7 +446,7 @@ final class pay_weixinpay{
 		}
 	}
 	
-	/**
+	/*
 	 * 获取毫秒级别的时间戳
 	 */
 	private function getMillisecond(){
@@ -456,10 +458,10 @@ final class pay_weixinpay{
 		return $time;
 	}
 	
-	/**
+	/*
 	 * 输出xml字符
 	 * @throws Exception
-	**/
+	 */
 	private function ToXml(){
 		if(!is_array($this->values) 
 			|| count($this->values) <= 0)
@@ -480,7 +482,7 @@ final class pay_weixinpay{
         return $xml; 
 	}
 	
-	/**
+	/*
 	 * 格式化参数格式化成url参数
 	 */
 	private function ToUrlParams(){
@@ -496,7 +498,7 @@ final class pay_weixinpay{
 		return $buff;
 	}
 	
-	/**
+	/*
 	 * 生成签名
 	 * @return 签名，本函数不覆盖sign成员变量，如要设置签名需要调用SetSign方法赋值
 	 */
@@ -505,11 +507,15 @@ final class pay_weixinpay{
 		ksort($this->values);
 		$string = $this->ToUrlParams();
 		//签名步骤二：在string后加入KEY
-		if($this->GetParamer('trade_type') == 'APP'){
-			$string = $string . "&key=".$this->OPEN_KEY;//开放平台
-		}else{
-			$string = $string . "&key=".$this->_KEY;//公众号
-		}
+        if(isset($this->tradeType) && $this->tradeType == 'APP'){
+            $string = $string . "&key=".$this->OPEN_KEY;//开放平台
+        }else{
+            if($this->GetParamer('trade_type') == 'APP'){
+                $string = $string . "&key=".$this->OPEN_KEY;//开放平台
+            }else{
+                $string = $string . "&key=".$this->_KEY;//公众号
+            }
+        }
 		//签名步骤三：MD5加密
 		$string = md5($string);
 		//签名步骤四：所有字符转为大写
@@ -517,7 +523,7 @@ final class pay_weixinpay{
 		return $result;
 	}
 	
-	/**
+	/*
 	 * 产生随机字符串，不长于32位
 	 * @param int $length
 	 * @return 产生的随机字符串
@@ -533,7 +539,7 @@ final class pay_weixinpay{
 	
 	
 	//支付回调
-	/**
+	/*
 	 * 查询订单，WxPayOrderQuery中out_trade_no、transaction_id至少填一个
 	 * appid、mchid、spbill_create_ip、nonce_str不需要填入
 	 * @param WxPayOrderQuery $inputObj
@@ -549,10 +555,12 @@ final class pay_weixinpay{
 		}
 		if($this->GetParamer('trade_type') == 'APP'){
 			$this->SetParamer('appid',$this->OPEN_APPID);//开放平台appid
-			$this->SetParamer('mch_id',$this->OPEN_MCHID);//开放平台商户号id	
+			$this->SetParamer('mch_id',$this->OPEN_MCHID);//开放平台商户号id
+            $this->tradeType = 'APP';
 		}else{
 			$this->SetParamer('appid',$this->_APPID);//公众账号ID
-			$this->SetParamer('mch_id',$this->_MCHID);//商户号	
+			$this->SetParamer('mch_id',$this->_MCHID);//商户号
+            $this->tradeType = 'PUBLIC';
 		}
 		$this->SetParamer('nonce_str',$this->getNonceStr());//随机字符串
 		foreach($this->values as $key=>$item){
@@ -590,7 +598,7 @@ final class pay_weixinpay{
 		return true;
 	}
 	
-	/**
+	/*
 	 * notify回调方法，该方法中需要赋值需要输出的参数,不可重写
 	 * @param array $data
 	 * @return true回调出来完成不需要继续回调，false回调处理未完成需要继续回调
@@ -608,7 +616,7 @@ final class pay_weixinpay{
 		return $result;
 	}
 	
-	/**
+	/*
  	 * 支付结果通用通知
  	 * @param function $callback
  	 * 直接回调函数使用方法: notify(you_function);
@@ -628,7 +636,7 @@ final class pay_weixinpay{
 		return $this->NotifyCallBack($result);
 	}
 	
-	/**
+	/*
 	 * 回复通知
 	 * @param bool $needSign 是否需要签名输出
 	 */
@@ -644,7 +652,7 @@ final class pay_weixinpay{
 		echo $this->ToXml();
 	}
 	
-	/**
+	/*
 	 * 通过code从工作平台获取openid机器access_token
 	 * @param string $code 微信跳转回来带上的code
 	 * @return openid
@@ -675,7 +683,7 @@ final class pay_weixinpay{
 		return $openid;
 	}
 	
-	/**
+	/*
 	 * 构造获取open和access_toke的url地址
 	 * @param string $code，微信跳转带回的code
 	 * @return 请求的url
@@ -690,7 +698,7 @@ final class pay_weixinpay{
 		return "https://api.weixin.qq.com/sns/oauth2/access_token?".$bizString;
 	}
 	
-	/**
+	/*
 	 * 构造获取code的url连接
 	 * @param string $redirectUrl 微信服务器回跳的url，需要url编码
 	 * @return 返回构造好的url
@@ -707,7 +715,7 @@ final class pay_weixinpay{
 	}
 	
 	
-	/**
+	/*
 	 * 拼接签名字符串
 	 * @param array $urlObj
 	 * @return 返回已经拼接好的字符串
@@ -735,20 +743,37 @@ final class pay_weixinpay{
 		return $this->values[$key];
 	}
 	
-   /**
+   /*
 	* 判断属性是否存在
 	* @return true 或 false
 	*/
 	private function IsParamerSet($key){
 		return array_key_exists($key, $this->values);
 	}
-	
- //    /**
- //     * 留待以后拓展
- //     */
- //    public function getfields(){
- //        return array(
-                
- //            );
- //    }
+
+	/*
+	 *生成app支付调用sgin
+	 */
+    private function getSginApp($order){
+        $sginList = array();
+        $sginList['appid'] = $order['appid'];
+        $sginList['partnerid'] = $order['mch_id'];
+        $sginList['prepayid'] = $order['prepay_id'];
+        $sginList['package'] = 'Sign=WXPay';
+        $sginList['noncestr'] = $order['nonce_str'];
+        $sginList['timestamp'] = time();
+        //参数名ASCII字典序排序
+        ksort($sginList);
+        //初始化
+        $sginStr = "";
+        foreach($sginList as $key => $item){
+            $sginStr .= "&" . $key . '=' . $item;
+        }
+        $sginStr = trim($sginStr,'&');
+        $sginStr .= '&key=' . $this->OPEN_KEY;
+        $sign = md5($sginStr);
+        $sign = strtoupper($sign);
+        $sginList['sign'] = $sign;
+        return $sginList;
+    }
 }
